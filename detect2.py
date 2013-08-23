@@ -6,7 +6,7 @@ import collections
 def tokenize(s) :
     def whsep(sep, s) :
         return (" " + sep + " ").join(s.split(sep))
-    return re.findall(r"[a-z0-9']+|[^a-z0-9'\s]", s.lower())
+    return re.findall(r"[a-z0-9'/]+|[^a-z0-9'/\s]", s.lower())
     return whsep(".", whsep(",", s.lower())).split()
 
 def get_streets(s) :
@@ -390,7 +390,7 @@ def determine_address(s) :
         def is_house_number(j) :
             if j < 0 : return False
             tok = tokens[j]
-            return re.match(r"\d{1,6}.+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty", tok)
+            return re.match(r"\d{1,6}[\w]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty", tok)
         return (is_house_number(i-1) and -1) \
             or (is_house_number(i-2) and -2) \
             or (is_house_number(i-3) and -3)
@@ -399,15 +399,16 @@ def determine_address(s) :
     bestopts = []
     restrict_boroughs = False
     missing_house_number = False
-    print s
     for i, poss2 in poss.iteritems() :
         for j, opt in poss2.iteritems() :
             opt2 = opt
+            bopt = None
             for b in bposs :
                 if opt.text_intersects(b) : continue
-                opt3 = opt.with_borough(b)
+                opt3 = opt.with_borough(b.borough)
                 if opt3.streets :
                     opt2 = opt3
+                    bopt = b
             opt = opt2
             di = has_house_number(i)
             if not di :
@@ -418,14 +419,22 @@ def determine_address(s) :
                 restrict_boroughs = True
                 continue
             if len(opt.s) > maxlen :
-                bestopts = [(opt, di)]
+                bestopts = [(opt, di, bopt)]
                 maxlen = len(opt.s)
             elif len(opt.s) == maxlen :
-                bestopts.append((opt, di))
+                bestopts.append((opt, di, bopt))
+    def tok_str(bestopt) :
+        opt, di, bopt = bestopt
+        start = min(opt.i+di, bopt.i)
+        end = max(opt.j, bopt.j)
+        return {"whole_address" : " ".join(tokens[start:end+1]),
+                "borough" : list(opt.boroughs())[0].name,
+                "poss_housenum" : " ".join(tokens[opt.i+di:opt.i]),
+                "poss_streets" : list(set(s.normalized_name().split("*", 2)[0].strip()
+                                          for s in opt.streets))}
     if bestopts :
         return {'result' : 'ok',
-                'addresses' : [" ".join(tokens[o.i+di:o.i]) + " " + o.s
-                               for o, di in bestopts]}
+                'addresses' : [tok_str(b) for b in bestopts]}
     else :
         return {'result' : 'none',
                 'needs_borough' : restrict_boroughs,
