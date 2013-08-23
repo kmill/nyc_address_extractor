@@ -59,6 +59,7 @@ class SpellChecker(object) :
     def __init__(self) :
         self.words = collections.defaultdict(lambda : 1)
         self.alphabet = 'abcdefghijklmnopqrstuvwxyz\''
+        self.init_from_dict_words()
         self.init_from_Street()
         self.add_words(self.other_words)
     def init_from_Street(self) :
@@ -66,6 +67,10 @@ class SpellChecker(object) :
             words = [w for w in street.normalized_name().lower().split()
                      if all(c in self.alphabet for c in w)]
             self.add_words(words)
+    def init_from_dict_words(self) :
+        with open("/usr/share/dict/words", "r") as f :
+            for line in f :
+                self.add_words(line.split())
     def add_words(self, words) :
         for word in words :
             self.words[word] += 1
@@ -205,6 +210,8 @@ class StreetOpt(object) :
     def with_borough(self, borough) :
         return StreetOpt(self.i, self.j, self.s,
                          set(s for s in self.streets if s.borough == borough))
+    def boroughs(self) :
+        return set(s.borough for s in self.streets)
     def make_singleton(self, street) :
         return StreetOpt(self.i, self.j, self.s, set([street]))
 class BoroughOpt(object) :
@@ -254,7 +261,7 @@ def print_poss(poss, bposs, aposs) :
         print poss
 
 def get_reasonable_3_groups(poss, bposs) :
-    bound = max(poss.iterkeys())
+    bound = max(poss.iterkeys()) if poss else -1
     def _get(start, num) :
         if num == 0 :
             yield []
@@ -277,6 +284,7 @@ def get_reasonable_3_groups(poss, bposs) :
         return new
     groups = list(group for group in _get(0, 3) if having_small_dist(group))
     boroughed = []
+    maybe_has_addr = len(groups) > 0
     for group in groups :
         added_borough = False
         for bopt in bposs :
@@ -303,7 +311,7 @@ def get_reasonable_3_groups(poss, bposs) :
         new = regroup(group)
         if new :
             regrouped.extend(new)
-    return regrouped
+    return regrouped, maybe_has_addr
     
 def evaluate_group(group) :
     s1 = list(group[0].streets)[0]
@@ -317,71 +325,150 @@ def evaluate_group(group) :
     score = score / (group[1].dist(group[2]) + 1)
     locs = []
     for loc in streets.get_locations(s1, s2, s3) :
-        locs.append((score, loc))
+        locs.append((score, loc, min(s.i for s in group), max(s.j for s in group)))
     return locs
 
 def get_reasonable_addresses(poss, bposs, aposs) :
     bposs = [None] + bposs
     poss2 = [p for poss2 in poss.itervalues() for p in poss2.itervalues()]
     found = []
+    possibly_missing_address = False
     for b in bposs :
         for p in poss2 :
             if b :
                 if p.text_intersects(b) : continue
                 p = p.with_borough(b)
+                mini = min(p.i, b.i)
+                maxj = max(p.j, b.j)
+            else :
+                mini = p.i
+                maxj = p.j
             for s in p.streets :
                 locs = streets.Location.mstreet_to_locations.get(s, [])
+                if locs and len(p.s) >= 5 : # ARBITRARY
+                    possibly_missing_address = True
                 for a in aposs :
+                    mini2 = min(mini, a.i)
+                    maxj2 = max(maxj, a.j)
                     if p.text_intersects(a) : continue
                     alocs = set([l for l in locs if a.address in l.addresses])
                     if alocs :
-                        found.append((a, b, p, s, alocs))
+                        found.append((a, b, p, s, alocs, mini2, maxj2))
     best = []
+    lbound = 1000
+    hbound = -1
     score = -1
     for f in found :
-        sc = evaluate_address(f)
+        sc, mini, maxj = evaluate_address(f)
         if sc > score :
             score = sc
             best = list(f[4])
+            lbound = mini
+            hbound = maxj
         elif sc == score :
             best.extend(f[4])
-    return best
+            lbound = min(lbound, mini)
+            hbound = max(hbound, maxj)
+    return best, lbound, hbound, possibly_missing_address
 
 def evaluate_address(res) :
-    a, b, p, s, alocs = res
+    a, b, p, s, alocs, mini, maxj = res
     score = 1.0
     score = score * len(a.s) / len(a.address.num)
     score = score * len(p.s) / len(s.name)
     score = score / (p.dist(a) + 1)
     if b :
         score = score / (p.dist(b) + 1)
-    return score
+    return score, mini, maxj
+
+def determine_address(s) :
+    """Different from get_reasonable_addresses because it doesn't
+    attempt to get a location; just try to get a substring which is an
+    address."""
+    tokens = tokenize(s)
+    def has_house_number(i) :
+        def is_house_number(j) :
+            if j < 0 : return False
+            tok = tokens[j]
+            return re.match(r"\d{1,6}.+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty", tok)
+        return (is_house_number(i-1) and -1) \
+            or (is_house_number(i-2) and -2) \
+            or (is_house_number(i-3) and -3)
+    poss, bposs, aposs = get_all_possible_streets(s)
+    maxlen = -1
+    bestopts = []
+    restrict_boroughs = False
+    missing_house_number = False
+    print s
+    for i, poss2 in poss.iteritems() :
+        for j, opt in poss2.iteritems() :
+            opt2 = opt
+            for b in bposs :
+                if opt.text_intersects(b) : continue
+                opt3 = opt.with_borough(b)
+                if opt3.streets :
+                    opt2 = opt3
+            opt = opt2
+            di = has_house_number(i)
+            if not di :
+                if len(opt.s) >= 5 : # ARBITRARY
+                    missing_house_number = True
+                continue
+            if len(opt.boroughs()) > 1 :
+                restrict_boroughs = True
+                continue
+            if len(opt.s) > maxlen :
+                bestopts = [(opt, di)]
+                maxlen = len(opt.s)
+            elif len(opt.s) == maxlen :
+                bestopts.append((opt, di))
+    if bestopts :
+        return {'result' : 'ok',
+                'addresses' : [" ".join(tokens[o.i+di:o.i]) + " " + o.s
+                               for o, di in bestopts]}
+    else :
+        return {'result' : 'none',
+                'needs_borough' : restrict_boroughs,
+                'needs_house_number' : missing_house_number}
 
 def determine_locations(s) :
     poss, bposs, aposs = get_all_possible_streets(s)
-    groups = get_reasonable_3_groups(poss, bposs)
+    groups, has_addr = get_reasonable_3_groups(poss, bposs)
     locs = set()
     for group in groups :
         locs.update(evaluate_group(group))
     best = []
     score = -1
-    for sc, loc in locs :
+    lbound = 1000
+    hbound = -1
+    for sc, loc, i, j in locs :
         if sc == score :
             best.append(loc)
+            lbound = min(lbound, i)
+            hbound = max(hbound, j)
         elif sc > score :
             score = sc
             best = [loc]
+            lbound = i
+            hbound = j
     if not best :
-        best = get_reasonable_addresses(poss, bposs, aposs)
+        best, lbound, hbound, has_addr = get_reasonable_addresses(poss, bposs, aposs)
     if not best :
-        return ("none",)
+        return {"result" : "none", "maybe" : has_addr}
     if len(set(b.borough for b in best)) > 1 :
-        return ("error: too many boroughs", best)
-    return ("ok", best)
+        return {"result" : "boroughs",
+                "question" : "Please specify a borough.",
+                "state" : [b.id for b in best]}
+    return {"result" : "ok",
+            "locs" : [b.id for b in best],
+            "substring" : " ".join(tokenize(s)[lbound:hbound+1])}
+
+#def determine_address(s) :
 
 def signs_for_locations(locs) :
     signs = []
-    for loc in locs :
+    for locid in locs :
+        loc = streets.Location.locations[locid]
         for sign in loc.signs :
             signs.append((loc.side, sign))
     return signs

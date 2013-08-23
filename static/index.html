@@ -1,0 +1,84 @@
+<html>
+<head>
+<script type="text/javascript"  src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js" ></script>
+<script type="text/javascript">
+var locs = null;
+$(function () {
+  $("#extract").on("submit", function (e) {
+    e.preventDefault();
+    $("#output").empty();
+    var data = {
+      type : "location",
+      text : $("#input").val()
+    };
+    $.get("/extract", {req : JSON.stringify(data)}, function (res) {
+      $("#output").text(JSON.stringify(res));
+      $("#signoutput").empty();
+      r = res['response'];
+      if (r['result'] === 'ok') {
+        $('#signs').show();
+        locs = r['locs'];
+      } else {
+        $('#signs').hide();
+      }
+    }, "json");
+    return false;
+  });
+  $('#signs').hide();
+  $('#getsigns').on('click', function () {
+    var data = {
+      type : "signs",
+      locs : locs
+    };
+    $.get("/extract", {req : JSON.stringify(data)}, function (res) {
+      $("#signoutput").text(res.response['text']);
+    }, "json");
+  });
+
+  $("#aextract").on("submit", function (e) {
+    e.preventDefault();
+    $("#aoutput").empty();
+    var data = {
+      type : "addresses",
+      text : $("#ainput").val()
+    };
+    $.get("/extract", {req : JSON.stringify(data)}, function (res) {
+      $("#aoutput").text(JSON.stringify(res));
+    }, "json");
+    return false;
+  });
+});
+</script>
+</head>
+<body>
+<table><tr>
+<td valign="top">
+  <h1>Location extractor</h1>
+  <form id="extract">
+    <textarea id="input" defaultValue="ask question about nyc location"></textarea>
+    <input type="submit" value="Submit"/>
+  </form>
+
+  <div id="output">
+  </div>
+
+  <div id="signs">
+    <input id="getsigns" type="submit" value="Get street sweeper signs"/>
+    <div id="signoutput">
+    </div>
+  </div>
+</td>
+<td valign="top" style="padding-left: 2em;">
+  <h1>Address extractor</h1>
+  <form id="aextract">
+    <textarea id="ainput"></textarea>
+    <input type="submit" value="Submit"/>
+  </form>
+  <div id="aoutput">
+  </div>
+</td>
+</tr>
+</table>
+</body>
+</html>
+
