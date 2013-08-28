@@ -413,7 +413,7 @@ def determine_address(s) :
             for b in bposs :
                 if opt.text_intersects(b) : continue
                 opt3 = opt.with_borough(b.borough)
-                if opt3.streets :
+                if opt3 and opt3.streets :
                     opt2 = opt3
                     bopt = b
             opt = opt2
@@ -425,15 +425,16 @@ def determine_address(s) :
             if len(opt.boroughs()) > 1 :
                 restrict_boroughs = True
                 continue
-            if len(opt.s) > maxlen :
+            if (len(opt.s) > 2  # ARBITRARY
+                and len(opt.s) > maxlen) :
                 bestopts = [(opt, di, bopt)]
                 maxlen = len(opt.s)
             elif len(opt.s) == maxlen :
                 bestopts.append((opt, di, bopt))
     def tok_str(bestopt) :
         opt, di, bopt = bestopt
-        start = min(opt.i+di, bopt.i)
-        end = max(opt.j, bopt.j)
+        start = min(opt.i+di, bopt.i if bopt else 100000)
+        end = max(opt.j, bopt.j if bopt else -1)
         return {"whole_address" : " ".join(tokens[start:end+1]),
                 "borough" : list(opt.boroughs())[0].name,
                 "poss_housenum" : " ".join(tokens[opt.i+di:opt.i]),
@@ -468,7 +469,16 @@ def determine_locations(s) :
             lbound = i
             hbound = j
     if not best :
-        best, lbound, hbound, has_addr = get_reasonable_addresses(poss, bposs, aposs)
+        #best, lbound, hbound, has_addr = get_reasonable_addresses(poss, bposs, aposs)
+        ares = determine_address(s)
+        if ares['result'] == 'ok' :
+            for addr in ares['addresses'] :
+                rres = determine_locations(addr['whole_address'])
+                if rres['result'] == 'ok' :
+                    return rres
+        elif ares['result'] == 'none' :
+            best = []
+            has_addr = ares['needs_house_number']
     if not best :
         return {"result" : "none", "maybe" : has_addr}
     if len(set(b.borough for b in best)) > 1 :
