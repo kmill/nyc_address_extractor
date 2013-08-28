@@ -30,6 +30,7 @@ class Identified(object) :
         self.id = Identified.next_gid
         Identified.next_gid += 1
     def __eq__(self, other) :
+        return self.id == other.id # less safe but faster!
         return type(self) == type(other) and self.id == other.id
     def __hash__(self) :
         return hash(self.id)

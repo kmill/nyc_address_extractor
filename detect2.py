@@ -223,31 +223,37 @@ class BoroughOpt(object) :
     def __repr__(self) :
         return "BoroughOpt(%r, %r, %r)" % (self.i, self.j, self.borough)
 class AddressOpt(object) :
-    def __init__(self, i, j, s, address) :
+    def __init__(self, i, j, s, addresses) :
         self.i = i
         self.j = j
         self.s = s
-        self.address = address
+        self.addresses = addresses
     def __repr__(self) :
-        return "AddressOpt(%r, %r, %r)" % (self.i, self.j, self.address)
+        return "AddressOpt(%r, %r, len=%r)" % (self.i, self.j, len(self.addresses))
 
 def get_all_possible_streets(s) :
     toks = tokenize(s)
+    tokopts = [list(get_token_options(t)) for t in toks]
+    def get_all_token_options(i, j) :
+        return set([" ".join(os)
+                    for os in itertools.product(*(tokopts[k] for k in xrange(i, j)))])
     poss = {}
     bposs = []
     aposs = []
     for i in xrange(0, len(toks)) :
         for j in xrange(i, len(toks)) :
-            if j - i > 6 : break # ARBITRARY
-            opts = get_all_token_options(toks[i:j+1])
+            if j - i >= 4 : break # (based on: 5-or-more streets are silly looking)
+            #opts = get_all_token_options(toks[i:j+1])
+            opts = get_all_token_options(i, j+1)
             ss = get_all_streets(opts)
             if 0 < len(ss) <= 50 : # ARBITRARY
                 poss.setdefault(i, {})[j] = StreetOpt(i, j, " ".join(toks[i:j+1]), ss)
             for opt in opts :
                 for b in streets.Borough.from_keyword(opt) :
                     bposs.append(BoroughOpt(i, j, " ".join(toks[i:j+1]), b))
-                for a in streets.Address.from_keyword(opt) :
-                    aposs.append(AddressOpt(i, j, " ".join(toks[i:j+1]), a))
+                addresses = streets.Address.from_keyword(opt)
+                if addresses :
+                    aposs.append(AddressOpt(i, j, " ".join(toks[i:j+1]), addresses))
     return poss, bposs, aposs
 
 
@@ -351,9 +357,10 @@ def get_reasonable_addresses(poss, bposs, aposs) :
                     mini2 = min(mini, a.i)
                     maxj2 = max(maxj, a.j)
                     if p.text_intersects(a) : continue
-                    alocs = set([l for l in locs if a.address in l.addresses])
-                    if alocs :
-                        found.append((a, b, p, s, alocs, mini2, maxj2))
+                    for a2 in a.addresses :
+                        alocs = set(l for l in locs if a2 in l.addresses)
+                        if alocs :
+                            found.append((a, a2, b, p, s, alocs, mini2, maxj2))
     best = []
     lbound = 1000
     hbound = -1
@@ -362,19 +369,19 @@ def get_reasonable_addresses(poss, bposs, aposs) :
         sc, mini, maxj = evaluate_address(f)
         if sc > score :
             score = sc
-            best = list(f[4])
+            best = list(f[5])
             lbound = mini
             hbound = maxj
         elif sc == score :
-            best.extend(f[4])
+            best.extend(f[5])
             lbound = min(lbound, mini)
             hbound = max(hbound, maxj)
     return best, lbound, hbound, possibly_missing_address
 
 def evaluate_address(res) :
-    a, b, p, s, alocs, mini, maxj = res
+    a, a2, b, p, s, alocs, mini, maxj = res
     score = 1.0
-    score = score * len(a.s) / len(a.address.num)
+    score = score * len(a.s) / len(a2.num)
     score = score * len(p.s) / len(s.name)
     score = score / (p.dist(a) + 1)
     if b :
