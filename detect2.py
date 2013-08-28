@@ -473,9 +473,9 @@ def determine_locations(s) :
         ares = determine_address(s)
         if ares['result'] == 'ok' :
             for addr in ares['addresses'] :
-                rres = determine_locations(addr['whole_address'])
-                if rres['result'] == 'ok' :
-                    return rres
+                best, lbound, hbound, has_addr = get_reasonable_addresses(*get_all_possible_streets(addr['whole_address']))
+                if best :
+                    break
         elif ares['result'] == 'none' :
             best = []
             has_addr = ares['needs_house_number']
